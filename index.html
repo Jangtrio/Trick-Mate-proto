@@ -97,7 +97,7 @@
 const BOARD_SIZE = 5;
 const PREP_TIME = 20;
 const ATTACK_TIME = 8;
-const MAX_TURN = 10;
+const MAX_TURN = 1; // 10 -> 1
 
 const FACTIONS = {
   "수인": ["디아나","티그","루포","버터","코미","베니","베니","베니"],
@@ -329,9 +329,10 @@ function beginBattle(){
 }
 
 function endTurn(){
-  if(turn>=MAX_TURN){ phase="종료"; log("10턴 경과. 프로토타입 종료."); setPhase("종료",0); return; }
-  turn++; document.getElementById('turn').textContent=turn;
-  startAttack();
+  // 한 턴으로 끝내기
+  phase = "종료";
+  log("전투 완료. 프로토타입 종료.");
+  setPhase("종료",0);
 }
 
 /* ------------------ 상호작용 ------------------ */
