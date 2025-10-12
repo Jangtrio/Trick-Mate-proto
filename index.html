@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>체스형 미니게임 프로토타입</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1f2430; --line:#2b3242;
+    --text:#e6e9ef; --muted:#9aa3b2; --accent:#7cd1ff; --danger:#ff6b6b; --ok:#78e08f;
+  }
+  *{box-sizing:border-box;font-family:system-ui,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--text)}
+  .wrap{max-width:1200px;margin:20px auto;padding:12px}
+  .topbar{display:flex;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);padding:10px;border-radius:10px;position:sticky;top:8px;z-index:2}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 12px;border-radius:10px;cursor:pointer;user-select:none}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .btn-danger{border-color:#5a2931;background:#2a0f13;color:#ffb4b4}
+  .pill{padding:6px 10px;border-radius:999px;background:#101521;border:1px solid var(--line);font-weight:600}
+  .boards{display:grid;grid-template-columns:1fr 320px 1fr;gap:12px;margin-top:12px}
+  .board{display:grid;grid-template-columns:repeat(5,1fr);aspect-ratio:1;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .cell{border:1px solid #232838;display:flex;align-items:center;justify-content:center;font-weight:700;position:relative}
+  .cell:hover{outline:2px solid rgba(124,209,255,.25);outline-offset:-2px;cursor:pointer}
+  .cell.preview::after{content:"";position:absolute;inset:0;background:rgba(124,209,255,.18)}
+  .cell.hit{background:rgba(255,107,107,.22)}
+  .cell.kill{background:rgba(255,107,107,.35)}
+  .zone{display:flex;flex-direction:column;gap:12px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .reserve{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .chip{padding:8px;border-radius:10px;border:1px solid var(--line);text-align:center;background:var(--panel2);cursor:pointer;user-select:none}
+  .chip.sel{outline:2px solid var(--accent)}
+  .log{height:120px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:12px;font-size:14px}
+  .row{display:flex;gap:12px;align-items:center}
+  .center{display:flex;align-items:center;justify-content:center}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:5}
+  .overlay .start{background:#0b1320;border:1px solid #1c2a40;border-radius:18px;padding:28px 32px;box-shadow:0 10px 30px rgba(0,0,0,.4);text-align:center}
+  .overlay .start h1{margin:0 0 8px 0}
+  .badge{display:inline-block;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:#141925;margin-left:6px}
+  .status{min-width:120px;text-align:center}
+  small{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="overlay" id="overlay">
+  <div class="start">
+    <h1>게임 시작</h1>
+    <p><small>버튼을 누르면 진영이 배정됩니다.</small></p>
+    <button class="btn" id="btnStart">게임 시작</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="topbar">
+    <button class="btn" id="btnReady">준비 종료</button>
+    <div class="pill status"><span id="phase">대기</span> · <span id="timer">00</span>s</div>
+    <div class="pill">턴 <span id="turn">1</span>/10</div>
+    <div class="pill">내 진영 <span id="myFaction" class="badge">-</span></div>
+    <div class="pill">상대 진영 <span id="aiFaction" class="badge">-</span></div>
+    <div style="flex:1"></div>
+    <button class="btn" id="btnReset">초기화</button>
+    <button class="btn btn-danger" id="btnSurrender">항복</button>
+  </div>
+
+  <div class="boards">
+    <div>
+      <div class="center" style="margin-bottom:6px;">플레이어 보드</div>
+      <div class="board" id="boardMe"></div>
+    </div>
+
+    <div class="zone">
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <div><b>기물 카테고리</b> <small id="reserveInfo">(남은 0/8)</small></div>
+          <div class="pill"><small>배치/이동: 클릭 → 빈칸</small></div>
+        </div>
+        <div class="reserve" id="reserve"></div>
+      </div>
+      <div class="panel">
+        <b>공격 안내</b>
+        <div style="margin-top:6px">
+          <small>1) 내 기물 클릭 → 2) 우측 적 보드 칸 클릭으로 범위 미리보기 → 같은 칸 다시 클릭 시 공격 확정.</small>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="center" style="margin-bottom:6px;">적 보드</div>
+      <div class="board" id="boardAI"></div>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+/* ------------------ 기본 데이터 ------------------ */
+const BOARD_SIZE = 5;
+const PREP_TIME = 20;     // 초
+const ATTACK_TIME = 8;    // 초
+const MAX_TURN = 10;
+
+const FACTIONS = {
+  "수인": ["디아나","티그","루포","버터","코미","베니","베니","베니"],
+  "요정": ["에르핀","네르","죠안","에슈르","마요(멋짐)","마리","마리","마리"],
+  "마녀": ["벨리타","프리클","셰럼","마카샤","포셔","레비","레비","레비"]
+};
+
+// 공격 패턴 기본값. (필요 시 이 매핑만 수정)
+const PATTERNS = {
+  "디아나":"plus1",
+  "티그":"diag1",
+  "루포":"cross2",
+  "버터":"square1",
+  "코미":"line2",
+  "베니":"plus1",
+  "에르핀":"diag1",
+  "네르":"cross2",
+  "죠안":"plus1",
+  "에슈르":"line2",
+  "마요(멋짐)":"square1",
+  "마리":"plus1",
+  "벨리타":"line2",
+  "프리클":"diag1",
+  "셰럼":"plus1",
+  "마카샤":"cross2",
+  "포셔":"square1",
+  "레비":"plus1"
+};
+
+// 각 패턴의 상대좌표 집합
+function patternOffsets(kind){
+  switch(kind){
+    case "plus1": return [[1,0],[-1,0],[0,1],[0,-1]];
+    case "diag1": return [[1,1],[1,-1],[-1,1],[-1,-1]];
+    case "cross2": return [[1,0],[-1,0],[0,1],[0,-1],[2,0],[-2,0],[0,2],[0,-2]];
+    case "square1": return [[0,0],[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    case "line2": return [[1,0],[2,0],[-1,0],[-2,0],[0,1],[0,2],[0,-1],[0,-2]];
+    default: return [[0,0]];
+  }
+}
+
+/* ------------------ 상태 ------------------ */
+let myFaction=null, aiFaction=null;
+let turn = 1;
+let phase = "대기"; // 대기/진영배정/준비/공격/전투/종료
+let timerId=null, timeLeft=0;
+
+const me = blankBoard();
+const ai = blankBoard();
+let reserve = [];           // 플레이어 남은 기물
+let selectedReserve = null; // 선택된 예비 기물명
+let pickUp = null;          // 보드에서 들고 있는 좌표 {r,c}
+let attackChoice = null;    // {unitAt:{r,c}, target:{r,c}}
+let lastPreview = null;     // 마지막 미리보기 타겟
+let aiUnits = [];           // AI 보드상의 좌표 목록 갱신용
+
+/* ------------------ 유틸 ------------------ */
+function blankBoard(){ return Array.from({length:BOARD_SIZE},()=>Array(BOARD_SIZE).fill(null)); }
+function inRange(r,c){ return r>=0&&c>=0&&r<BOARD_SIZE&&c<BOARD_SIZE; }
+function rnd(n){ return Math.floor(Math.random()*n); }
+function deepCopy(x){ return JSON.parse(JSON.stringify(x)); }
+function fmtTime(n){ return String(n).padStart(2,"0"); }
+function log(msg){ const el=document.getElementById('log'); const t=new Date().toLocaleTimeString(); el.innerHTML = `[${t}] ${msg}<br>` + el.innerHTML; }
+
+/* ------------------ DOM 생성 ------------------ */
+const elBoardMe = document.getElementById('boardMe');
+const elBoardAI = document.getElementById('boardAI');
+const elReserve = document.getElementById('reserve');
+for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
+  const d=document.createElement('div'); d.className='cell'; d.dataset.idx=i; elBoardMe.appendChild(d);
+}
+for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
+  const d=document.createElement('div'); d.className='cell'; d.dataset.idx=i; elBoardAI.appendChild(d);
+}
+
+/* ------------------ 렌더 ------------------ */
+function renderBoards(){
+  const cellsMe = elBoardMe.children;
+  const cellsAI = elBoardAI.children;
+  // 내 보드
+  for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
+    const r=Math.floor(i/BOARD_SIZE), c=i%BOARD_SIZE;
+    const v = me[r][c];
+    const el = cellsMe[i];
+    el.textContent = v ? v.slice(0,2) : "";
+    el.title = v ? v : "";
+  }
+  // 적 보드: 비공개. 타격/사망만 표시
+  for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
+    const el=cellsAI[i]; el.textContent=""; el.title="";
+    el.classList.remove('hit','kill','preview');
+  }
+  // 미리보기 유지
+  if(lastPreview){ previewOn(lastPreview.r,lastPreview.c,true); }
+}
+
+function renderReserve(){
+  elReserve.innerHTML="";
+  reserve.forEach((name,idx)=>{
+    const d=document.createElement('div');
+    d.className='chip'+(selectedReserve===idx?' sel':'');
+    d.textContent=name;
+    d.title=`패턴: ${PATTERNS[name]||'default'}`;
+    d.onclick=()=>{ selectedReserve = (selectedReserve===idx? null: idx); pickUp=null; renderReserve(); };
+    elReserve.appendChild(d);
+  });
+  document.getElementById('reserveInfo').textContent = `(남은 ${reserve.length}/8)`;
+}
+
+function setPhase(p, seconds=0){
+  phase=p; document.getElementById('phase').textContent=p;
+  clearInterval(timerId); timeLeft=seconds; document.getElementById('timer').textContent=fmtTime(timeLeft);
+  if(seconds>0){
+    timerId=setInterval(()=>{
+      timeLeft--; document.getElementById('timer').textContent=fmtTime(timeLeft);
+      if(timeLeft<=0){ clearInterval(timerId); onTimerEnd(); }
+    },1000);
+  }
+}
+
+function clearEnemyMarks(){
+  [...elBoardAI.children].forEach(el=>el.classList.remove('preview','hit','kill'));
+}
+
+/* ------------------ 단계 전이 ------------------ */
+function onTimerEnd(){
+  if(phase==="준비"){ finishPrepare(); }
+  else if(phase==="공격"){ autoAttackIfNone(); }
+}
+
+/* ------------------ 진영 배정 ------------------ */
+function assignFactions(){
+  const keys=Object.keys(FACTIONS);
+  myFaction = keys[rnd(keys.length)];
+  document.getElementById('myFaction').textContent = myFaction;
+  log(`내 진영 배정: ${myFaction}`);
+
+  setTimeout(()=>{
+    const others = keys.filter(k=>k!==myFaction);
+    aiFaction = others[rnd(others.length)];
+    document.getElementById('aiFaction').textContent = aiFaction;
+    log(`상대 진영 배정: ${aiFaction}`);
+    startPrepare();
+  },1000);
+}
+
+/* ------------------ 준비 단계 ------------------ */
+function startPrepare(){
+  // 초기화
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++){ me[r][c]=null; }
+  reserve = deepCopy(FACTIONS[myFaction]).sort((a,b)=>a.localeCompare(b)); // 보기 좋게 정렬
+  selectedReserve=null; pickUp=null; attackChoice=null; lastPreview=null;
+  renderReserve(); renderBoards();
+  aiRandomFill(); // 상대는 항상 랜덤 배치
+  setPhase("준비", PREP_TIME);
+  log("준비 단계 시작. 배치 완료 후 [준비 종료] 클릭.");
+}
+
+function finishPrepare(){
+  // 남은 기물 랜덤 자동 배치
+  while(reserve.length>0){
+    const name = reserve.shift();
+    const empty = emptyCells(me);
+    if(empty.length===0) break;
+    const {r,c}= empty[rnd(empty.length)];
+    me[r][c]=name;
+  }
+  selectedReserve=null; renderReserve(); renderBoards();
+  log("준비 단계 종료.");
+  startAttack();
+}
+
+function emptyCells(board){
+  const arr=[];
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(!board[r][c]) arr.push({r,c});
+  return arr;
+}
+
+function aiRandomFill(){
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) ai[r][c]=null;
+  const pool = deepCopy(FACTIONS[aiFaction]||[]);
+  while(pool.length>0){
+    const name=pool.shift();
+    const empty=emptyCells(ai);
+    if(empty.length===0) break;
+    const {r,c}=empty[rnd(empty.length)];
+    ai[r][c]=name;
+  }
+  collectAiUnits();
+}
+function collectAiUnits(){
+  aiUnits=[];
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(ai[r][c]) aiUnits.push({r,c,name:ai[r][c]});
+}
+
+/* ------------------ 공격 단계 ------------------ */
+function startAttack(){
+  setPhase("공격", ATTACK_TIME);
+  attackChoice=null; lastPreview=null; clearEnemyMarks();
+  log("공격 단계 시작. 내 기물 하나를 선택하고 적 보드를 지정하세요.");
+}
+
+function autoAttackIfNone(){
+  if(attackChoice){ return beginBattle(); }
+  // 랜덤 기물 + 랜덤 목표
+  const myUnits=[];
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(me[r][c]) myUnits.push({r,c,name:me[r][c]});
+  if(myUnits.length===0){ beginBattle(); return; }
+  const unit = myUnits[rnd(myUnits.length)];
+  const target = {r:rnd(BOARD_SIZE), c:rnd(BOARD_SIZE)};
+  attackChoice={unitAt:unit, target};
+  log(`시간 초과. 랜덤 공격 선택: ${unit.name} → (${target.r+1},${target.c+1})`);
+  beginBattle();
+}
+
+/* ------------------ 전투 단계 ------------------ */
+function beginBattle(){
+  setPhase("전투");
+  clearEnemyMarks();
+  if(!attackChoice){ log("공격 없음."); endTurn(); return; }
+  const {unitAt, target} = attackChoice;
+  const name = me[unitAt.r][unitAt.c];
+  const pattern = PATTERNS[name] || "plus1";
+  const ofs = patternOffsets(pattern);
+  let hits=0, kills=0;
+
+  ofs.forEach(([dr,dc])=>{
+    const rr=target.r+dr, cc=target.c+dc;
+    if(!inRange(rr,cc)) return;
+    const idx=rr*BOARD_SIZE+cc;
+    const el=elBoardAI.children[idx];
+    el.classList.add('hit');
+    if(ai[rr][cc]){
+      ai[rr][cc]=null; kills++;
+      el.classList.add('kill');
+    }
+    hits++;
+  });
+  collectAiUnits();
+  log(`전투: ${name}의 패턴[${pattern}]이 ${hits}칸에 타격, ${kills}개 격파.`);
+  // 종료 조건 검사
+  if(aiUnits.length===0){ phase="종료"; log("승리: 상대 기물 전멸."); return; }
+  endTurn();
+}
+
+function endTurn(){
+  if(turn>=MAX_TURN){ phase="종료"; log("10턴 경과. 프로토타입 종료."); setPhase("종료",0); return; }
+  turn++; document.getElementById('turn').textContent=turn;
+  // 다음 턴: 간단히 재-공격만 반복. 필요 시 startPrepare()로 변경 가능.
+  startAttack(); // 배치 유지하고 다음 공격으로 진행
+}
+
+/* ------------------ 상호작용 ------------------ */
+// 내 보드 클릭: 준비단계에서 배치/이동. 공격단계에서 유닛 선택.
+elBoardMe.addEventListener('click', (e)=>{
+  const idx = e.target.dataset.idx; if(idx===undefined) return;
+  const r=Math.floor(idx/BOARD_SIZE), c=idx%BOARD_SIZE;
+
+  if(phase==="준비"){
+    if(selectedReserve!=null && !me[r][c]){
+      // 예비 → 빈칸 배치
+      const name = reserve.splice(selectedReserve,1)[0];
+      selectedReserve=null; me[r][c]=name; renderReserve(); renderBoards();
+    }else if(me[r][c] && !pickUp){
+      // 집기
+      pickUp={r,c}; e.target.classList.add('preview');
+    }else if(pickUp){
+      // 내려놓기
+      if(!me[r][c]){
+        me[r][c]=me[pickUp.r][pickUp.c]; me[pickUp.r][pickUp.c]=null;
+      }
+      pickUp=null; renderBoards();
+    }
+  }else if(phase==="공격"){
+    if(me[r][c]){ attackChoice={unitAt:{r,c,name:me[r][c]}, target:null}; log(`선택: ${me[r][c]} (내 보드 ${r+1},${c+1})`); }
+  }
+});
+
+// 적 보드 클릭: 공격 미리보기 → 같은 칸 재클릭 시 확정
+elBoardAI.addEventListener('click',(e)=>{
+  if(phase!=="공격" || !attackChoice || !attackChoice.unitAt) return;
+  const idx = e.target.dataset.idx; if(idx===undefined) return;
+  const r=Math.floor(idx/BOARD_SIZE), c=idx%BOARD_SIZE;
+
+  if(lastPreview && lastPreview.r===r && lastPreview.c===c){
+    attackChoice.target={r,c}; log(`공격 확정: (${r+1},${c+1})`);
+    beginBattle();
+    return;
+  }
+  previewOn(r,c,false);
+});
+
+function previewOn(r,c,keep=false){
+  clearEnemyMarks();
+  lastPreview = {r,c};
+  const name = me[attackChoice.unitAt.r][attackChoice.unitAt.c];
+  const pattern = PATTERNS[name] || "plus1";
+  const ofs = patternOffsets(pattern);
+  ofs.forEach(([dr,dc])=>{
+    const rr=r+dr, cc=c+dc;
+    if(!inRange(rr,cc)) return;
+    const idx=rr*BOARD_SIZE+cc;
+    elBoardAI.children[idx].classList.add('preview');
+  });
+  if(!keep) log(`미리보기: 타겟 (${r+1},${c+1}), 패턴[${pattern}]`);
+}
+
+/* ------------------ 버튼 ------------------ */
+document.getElementById('btnStart').onclick=()=>{
+  document.getElementById('overlay').style.display='none';
+  setPhase("진영배정",0);
+  assignFactions();
+};
+document.getElementById('btnReady').onclick=()=>{ if(phase==="준비") finishPrepare(); };
+document.getElementById('btnReset').onclick=()=>{ location.reload(); };
+document.getElementById('btnSurrender').onclick=()=>{ phase="종료"; log("항복. 패배 처리."); setPhase("종료",0); };
+
+/* ------------------ 초기 렌더 ------------------ */
+renderBoards(); renderReserve();
+</script>
+</body>
+</html>
