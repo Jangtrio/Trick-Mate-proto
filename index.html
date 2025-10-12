@@ -182,7 +182,7 @@ function renderBoards(){
     const r=Math.floor(i/BOARD_SIZE), c=i%BOARD_SIZE;
     const v = me[r][c];
     const el = cellsMe[i];
-    el.textContent = v ? v.slice(0,2) : "";
+    el.textContent = v ?? "";
     el.title = v ? v : "";
   }
   // 적 보드: 비공개. 타격/사망만 표시
