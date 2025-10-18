@@ -269,7 +269,7 @@ function applyAttack(boardEl, boardData, attackerName, target){
   const ofs = patternOffsets(pattern);
   let hits=0, kills=0;
   ofs.forEach(([dr,dc])=>{
-    const rr=target.r+dr, cc=c=target.c+dc;
+    const rr = target.r + dr, cc = target.c + dc;
     if(!inRange(rr,cc)) return;
     const idx=rr*BOARD_SIZE+cc;
     const el=boardEl.children[idx];
@@ -404,9 +404,9 @@ function beginBattle(){
 async function enemyCounterAndEnd(){
   if(aiUnits.length>0){
     setPhase("상대턴",0);
-    showAiOverlay();
-    await nextFrame();
-    await delay(AI_TURN_DELAY);
+    showAiOverlay();          // 팝업 먼저 노출
+    await nextFrame();        // 페인트 보장
+    await delay(AI_TURN_DELAY); // 1초 대기
 
     clearMyMarks();
     const aiUnit = aiUnits[rnd(aiUnits.length)];
