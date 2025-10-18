@@ -24,6 +24,8 @@
   .cell.preview::after{content:"";position:absolute;inset:0;background:rgba(124,209,255,.18)}
   .cell.hit{background:rgba(255,107,107,.22)}
   .cell.kill{background:rgba(255,107,107,.35)}
+  /* 사용 완료 표시 */
+  .cell.exhaust{filter:grayscale(1); opacity:.5}
   .zone{display:flex;flex-direction:column;gap:12px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
   .reserve{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -71,7 +73,7 @@
   <div class="topbar">
     <button class="btn" id="btnReady">준비 종료</button>
     <div class="pill status"><span id="phase">대기</span> · <span id="timer">00</span>s</div>
-    <div class="pill">턴 <span id="turn">1</span>/10</div>
+    <div class="pill">턴 <span id="turn">1</span>/2</div>
     <div class="pill">내 진영 <span id="myFaction" class="badge">-</span></div>
     <div class="pill">상대 진영 <span id="aiFaction" class="badge">-</span></div>
     <div style="flex:1"></div>
@@ -115,7 +117,7 @@
 const BOARD_SIZE = 5;
 const PREP_TIME = 20;
 const ATTACK_TIME = 8;
-const MAX_TURN = 1;
+const MAX_TURN = 2;            // 2턴까지 진행
 const AI_TURN_DELAY = 1000;
 
 /* 진영 구성 */
@@ -162,6 +164,7 @@ let attackChoice = null;
 let lastPreview = null;
 let aiUnits = [];
 let hasAttacked = false;
+let exhausted = new Set();      // 사용 완료 셀 "r,c"
 
 /* ------------------ 유틸 ------------------ */
 function blankBoard(){ return Array.from({length:BOARD_SIZE},()=>Array(BOARD_SIZE).fill(null)); }
@@ -190,13 +193,15 @@ function renderBoards(){
   const cellsMe = elBoardMe.children;
   const cellsAI = elBoardAI.children;
 
-  // 내 보드: 이름 + HP바
+  // 내 보드: 이름 + HP바 + 사용완료 표시
   for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
     const r=Math.floor(i/BOARD_SIZE), c=i%BOARD_SIZE;
     const v = me[r][c];
     const el = cellsMe[i];
     el.classList.remove('preview'); // hit/kill은 유지
     renderCell(el, v, true);
+    const key = `${r},${c}`;
+    el.classList.toggle('exhaust', !!v && exhausted.has(key));
   }
 
   // 적 보드: 전투/상대턴에는 hit/kill 유지, preview만 제거
@@ -268,7 +273,7 @@ function applyAttack(boardEl, boardData, attackerName, target){
   const ofs = patternOffsets(pattern);
   let hits=0, kills=0;
   ofs.forEach(([dr,dc])=>{
-    const rr = target.r + dr, cc = target.c + dc; // 오타 수정 완료
+    const rr = target.r + dr, cc = target.c + dc;
     if(!inRange(rr,cc)) return;
     const idx=rr*BOARD_SIZE+cc;
     const el=boardEl.children[idx];
@@ -315,6 +320,7 @@ function startPrepare(){
   for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) me[r][c]=null;
   reserve = deepCopy(FACTIONS[myFaction]).sort((a,b)=>a.localeCompare(b));
   selectedReserve=null; pickUp=null; attackChoice=null; lastPreview=null;
+  exhausted.clear(); // 새 게임
   aiRandomFill();
   renderReserve(); renderBoards();
   setPhase("준비", PREP_TIME);
@@ -363,15 +369,17 @@ function startAttack(){
   setPhase("공격", ATTACK_TIME);
   attackChoice=null; lastPreview=null; clearEnemyMarks(); clearMyMarks();
   renderBoards();
-  log("공격 단계 시작. 내 기물 하나를 선택하고 적 보드를 지정하세요.");
+  log(`공격 단계 시작. 턴 ${turn}. 이미 사용한 기물은 선택 불가.`);
 }
 
 function autoAttackIfNone(){
   if(attackChoice){ return beginBattle(); }
   hasAttacked = true;
   const myUnits=[];
-  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(me[r][c]) myUnits.push({r,c,name:me[r][c].name});
-  if(myUnits.length===0){ beginBattle(); return; }
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++){
+    if(me[r][c] && !exhausted.has(`${r},${c}`)) myUnits.push({r,c,name:me[r][c].name});
+  }
+  if(myUnits.length===0){ log("사용 가능한 기물이 없음. 공격 스킵."); beginBattle(); return; }
   const unit = myUnits[rnd(myUnits.length)];
   const target = {r:rnd(BOARD_SIZE), c:rnd(BOARD_SIZE)};
   attackChoice={unitAt:unit, target};
@@ -385,15 +393,16 @@ function beginBattle(){
   if(!attackChoice){ log("공격 없음."); enemyCounterAndEnd(); return; }
   hasAttacked = true;
 
-  // 1) 플레이어 공격
+  // 사용 처리 + 플레이어 공격
   const {unitAt, target} = attackChoice;
+  exhausted.add(`${unitAt.r},${unitAt.c}`);         // 재사용 금지
   const myName = me[unitAt.r][unitAt.c]?.name;
   const res = applyAttack(elBoardAI, ai, myName, target);
   collectAiUnits();
   log(`전투: ${myName}의 패턴[${res.pattern}]이 ${res.hits}칸 타격, ${res.kills}개 격파.`);
   if(aiUnits.length===0){ phase="종료"; log("승리: 상대 기물 전멸."); setPhase("종료",0); return; }
 
-  // 2) AI 반격
+  // AI 반격
   enemyCounterAndEnd();
 }
 
@@ -423,10 +432,22 @@ function countUnits(board){
   return n;
 }
 
+/* ------------------ 턴 종료/진행 ------------------ */
 function endTurn(){
-  phase = "종료";
-  log("전투 완료. 프로토타입 종료.");
-  setPhase("종료",0);
+  const meAlive = countUnits(me)>0;
+  const aiAlive = countUnits(ai)>0;
+  if(!meAlive || !aiAlive || turn>=MAX_TURN){
+    phase="종료";
+    log("프로토타입 종료.");
+    setPhase("종료",0);
+    return;
+  }
+  turn++; document.getElementById('turn').textContent = turn;
+  setPhase("공격", ATTACK_TIME);
+  hasAttacked=false; attackChoice=null; lastPreview=null;
+  clearEnemyMarks(); clearMyMarks();
+  renderBoards();
+  log(`턴 ${turn} 시작. 이미 사용한 기물은 회색으로 표시되며 선택 불가.`);
 }
 
 /* ------------------ 상호작용 ------------------ */
@@ -448,6 +469,8 @@ elBoardMe.addEventListener('click', (e)=>{
   }else if(phase==="공격"){
     if(hasAttacked) return;
     if(attackChoice && attackChoice.unitAt) return;
+    const key = `${r},${c}`;
+    if(exhausted.has(key)) { log("이미 사용한 기물입니다."); return; }
     if(me[r][c]){ attackChoice={unitAt:{r,c,name:me[r][c].name}, target:null}; log(`선택: ${me[r][c].name} (내 보드 ${r+1},${c+1})`); }
   }
 });
