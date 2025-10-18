@@ -133,7 +133,7 @@ const PATTERNS = {
 /* HP 테이블 */
 const HP_TABLE = {
   "디아나":3, "버터":2, "티그":2, "루포":2, "코미":2, "베니":1,
-  "벨리타":3, "프리کل":2, "마카샤":2, "셰럼":2, "포셔":2, "레비":1, // 프리클 철자 주의
+  "벨리타":3, "프리클":2, "마카샤":2, "셰럼":2, "포셔":2, "레비":1,
   "에르핀":3, "네르":2, "죠안":2, "에슈르":2, "마요(멋짐)":2, "마리":1
 };
 function patternOffsets(kind){
@@ -195,19 +195,18 @@ function renderBoards(){
     const r=Math.floor(i/BOARD_SIZE), c=i%BOARD_SIZE;
     const v = me[r][c];
     const el = cellsMe[i];
-    el.classList.remove('preview'); // 내 보드는 전투 표시를 수동 유지
-    // hit/kill은 전투 중 보존을 위해 여기서 지우지 않음
+    el.classList.remove('preview'); // hit/kill은 유지
     renderCell(el, v, true);
   }
 
   // 적 보드: 전투/상대턴에는 hit/kill 유지, preview만 제거
   const keepMarks = (phase==="전투" || phase==="상대턴");
-for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
-  const el=cellsAI[i];
-  el.textContent=""; el.title="";
-  el.classList.remove('preview');
-  if(!keepMarks){ el.classList.remove('hit','kill'); }
-}
+  for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
+    const el=cellsAI[i];
+    el.textContent=""; el.title="";
+    el.classList.remove('preview');
+    if(!keepMarks){ el.classList.remove('hit','kill'); }
+  }
 
   if(lastPreview){ previewOn(lastPreview.r,lastPreview.c,true); }
 }
@@ -269,8 +268,7 @@ function applyAttack(boardEl, boardData, attackerName, target){
   const ofs = patternOffsets(pattern);
   let hits=0, kills=0;
   ofs.forEach(([dr,dc])=>{
--   const rr=target.r+dr, cc=c=target.c+dc; // 오타
-+   const rr = target.r + dr, cc = target.c + dc; // 정정
+    const rr = target.r + dr, cc = target.c + dc; // 오타 수정 완료
     if(!inRange(rr,cc)) return;
     const idx=rr*BOARD_SIZE+cc;
     const el=boardEl.children[idx];
@@ -384,8 +382,7 @@ function autoAttackIfNone(){
 /* ------------------ 전투 단계 ------------------ */
 function beginBattle(){
   setPhase("전투");
-  // 적 보드 이펙트 보존을 위해 여기서 전체 렌더 금지
-  if(!attackChoice){ log("공격 없음."); return enemyCounterAndEnd(); }
+  if(!attackChoice){ log("공격 없음."); enemyCounterAndEnd(); return; }
   hasAttacked = true;
 
   // 1) 플레이어 공격
@@ -397,15 +394,16 @@ function beginBattle(){
   if(aiUnits.length===0){ phase="종료"; log("승리: 상대 기물 전멸."); setPhase("종료",0); return; }
 
   // 2) AI 반격
-  function enemyCounterAndEnd(){
-+ async function enemyCounterAndEnd(){
+  enemyCounterAndEnd();
+}
+
+/* ------------------ 상대 턴(팝업 1초 후 반격) ------------------ */
+async function enemyCounterAndEnd(){
   if(aiUnits.length>0){
     setPhase("상대턴",0);
-    showAiOverlay();
--   // 즉시 공격 적용(잘못된 흐름)
--   // ...
-+   await nextFrame();           // 먼저 팝업 그리기
-+   await delay(AI_TURN_DELAY);  // 1초 대기
+    elAiOverlay.style.display='flex';
+    await nextFrame();           // 팝업 먼저 그리기
+    await delay(AI_TURN_DELAY);  // 1초 대기
 
     clearMyMarks();
     const aiUnit = aiUnits[rnd(aiUnits.length)];
@@ -413,12 +411,18 @@ function beginBattle(){
     const res2 = applyAttack(elBoardMe, me, aiUnit.name, targetMe);
     log(`적 반격: ${aiUnit.name}의 패턴[${res2.pattern}]이 내 보드 (${targetMe.r+1},${targetMe.c+1}) 기준으로 ${res2.hits}칸 타격, ${res2.kills}개 격파.`);
     const myRemainAfter = countUnits(me);
-    hideAiOverlay();
+    elAiOverlay.style.display='none';
+
     if(myRemainAfter===0){ phase="종료"; log("패배: 내 기물 전멸."); setPhase("종료",0); return; }
   }
   endTurn();
 }
-    
+
+function countUnits(board){
+  let n=0; for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(board[r][c]) n++;
+  return n;
+}
+
 function endTurn(){
   phase = "종료";
   log("전투 완료. 프로토타입 종료.");
