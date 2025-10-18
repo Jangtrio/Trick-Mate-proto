@@ -41,6 +41,12 @@
   /* 로딩 스피너 */
   .spinner{width:36px;height:36px;border:3px solid rgba(124,209,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 8px}
   @keyframes spin{to{transform:rotate(360deg)}}
+  /* 체력바 */
+  .unit{display:flex;flex-direction:column;align-items:center;gap:2px;line-height:1}
+  .unit-name{font-size:11px}
+  .hpbar{display:flex;gap:2px}
+  .hpseg{width:8px;height:4px;background:#233b2b;border-radius:2px;border:1px solid #2d4a36}
+  .hpseg.on{background:var(--ok);border-color:#3a7a52}
 </style>
 </head>
 <body>
@@ -125,6 +131,16 @@ const PATTERNS = {
   "벨리타":"line2","프리클":"diag1","셰럼":"plus1","마카샤":"cross2","포셔":"square1","레비":"plus1"
 };
 
+/* 체력 테이블 */
+const HP_TABLE = {
+  // 수인
+  "디아나":3, "버터":2, "티그":2, "루포":2, "코미":2, "베니":1,
+  // 마녀 (요청의 '베리타'는 오타로 보고 '벨리타' 적용)
+  "벨리타":3, "프리클":2, "마카샤":2, "셰럼":2, "포셔":2, "레비":1,
+  // 요정
+  "에르핀":3, "네르":2, "죠안":2, "에슈르":2, "마요(멋짐)":2, "마리":1
+};
+
 function patternOffsets(kind){
   switch(kind){
     case "plus1": return [[1,0],[-1,0],[0,1],[0,-1]];
@@ -159,11 +175,10 @@ function rnd(n){ return Math.floor(Math.random()*n); }
 function deepCopy(x){ return JSON.parse(JSON.stringify(x)); }
 function fmtTime(n){ return String(n).padStart(2,"0"); }
 function log(msg){ const el=document.getElementById('log'); const t=new Date().toLocaleTimeString(); el.innerHTML = `[${t}] ${msg}<br>` + el.innerHTML; }
-
-/* --- 여기 아래에 추가 --- */
+/* 페인트 보장용 */
 const delay = ms => new Promise(r => setTimeout(r, ms));
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
-  
+
 /* ------------------ DOM ------------------ */
 const elBoardMe = document.getElementById('boardMe');
 const elBoardAI = document.getElementById('boardAI');
@@ -180,21 +195,36 @@ for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
 function renderBoards(){
   const cellsMe = elBoardMe.children;
   const cellsAI = elBoardAI.children;
-  // 내 보드
+  // 내 보드: 이름 + 체력바 표시
   for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
     const r=Math.floor(i/BOARD_SIZE), c=i%BOARD_SIZE;
     const v = me[r][c];
     const el = cellsMe[i];
     el.classList.remove('preview','hit','kill');
-    el.textContent = v ?? "";
-    el.title = v ? v : "";
+    renderCell(el, v, true);
   }
-  // 적 보드 표시 초기화
+  // 적 보드: 비공개 유지
   for(let i=0;i<BOARD_SIZE*BOARD_SIZE;i++){
-    const el=cellsAI[i]; el.textContent=""; el.title="";
+    const el=cellsAI[i];
+    el.textContent="";
+    el.title="";
     el.classList.remove('hit','kill','preview');
   }
   if(lastPreview){ previewOn(lastPreview.r,lastPreview.c,true); }
+}
+
+function renderCell(el, unit, showHp){
+  if(!unit){ el.textContent=""; el.title=""; return; }
+  const {name, hp, max} = unit;
+  el.innerHTML = showHp ? (
+    `<div class="unit">
+       <div class="unit-name">${name}</div>
+       <div class="hpbar">${
+         Array.from({length:max},(_,i)=>`<div class="hpseg ${i<hp?'on':''}"></div>`).join('')
+       }</div>
+     </div>`
+  ) : name;
+  el.title = name + (showHp? ` HP ${hp}/${max}` : '');
 }
 
 function renderReserve(){
@@ -203,7 +233,7 @@ function renderReserve(){
     const d=document.createElement('div');
     d.className='chip'+(selectedReserve===idx?' sel':'');
     d.textContent=name;
-    d.title=`패턴: ${PATTERNS[name]||'default'}`;
+    d.title=`패턴: ${PATTERNS[name]||'default'} · HP ${HP_TABLE[name]||1}`;
     d.onclick=()=>{ selectedReserve = (selectedReserve===idx? null: idx); pickUp=null; renderReserve(); };
     elReserve.appendChild(d);
   });
@@ -228,7 +258,13 @@ function clearMyMarks(){
   [...elBoardMe.children].forEach(el=>el.classList.remove('preview','hit','kill'));
 }
 
-/* 공통: 보드에 공격 적용 */
+/* 보드에 유닛 생성 */
+function createUnit(name){
+  const max = HP_TABLE[name] || 1;
+  return {name, hp:max, max};
+}
+
+/* 공통: 보드에 공격 적용(HP 차감) */
 function applyAttack(boardEl, boardData, attackerName, target){
   const pattern = PATTERNS[attackerName] || "plus1";
   const ofs = patternOffsets(pattern);
@@ -240,8 +276,14 @@ function applyAttack(boardEl, boardData, attackerName, target){
     const el=boardEl.children[idx];
     el.classList.add('hit');
     if(boardData[rr][cc]){
-      boardData[rr][cc]=null; kills++;
-      el.classList.add('kill');
+      boardData[rr][cc].hp -= 1;
+      if(boardData[rr][cc].hp <= 0){
+        boardData[rr][cc]=null; kills++;
+        el.classList.add('kill');
+      }else{
+        // 남은 HP 재렌더
+        if(boardEl===elBoardMe) renderCell(el, boardData[rr][cc], true);
+      }
     }
     hits++;
   });
@@ -291,7 +333,7 @@ function finishPrepare(){
     const empty = emptyCells(me);
     if(empty.length===0) break;
     const {r,c}= empty[rnd(empty.length)];
-    me[r][c]=name;
+    me[r][c]=createUnit(name);
   }
   selectedReserve=null; renderReserve(); renderBoards();
   log("준비 단계 종료.");
@@ -312,13 +354,13 @@ function aiRandomFill(){
     const empty=emptyCells(ai);
     if(empty.length===0) break;
     const {r,c}=empty[rnd(empty.length)];
-    ai[r][c]=name;
+    ai[r][c]=createUnit(name);
   }
   collectAiUnits();
 }
 function collectAiUnits(){
   aiUnits=[];
-  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(ai[r][c]) aiUnits.push({r,c,name:ai[r][c]});
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(ai[r][c]) aiUnits.push({r,c,name:ai[r][c].name});
 }
 
 /* ------------------ 공격 단계 ------------------ */
@@ -326,6 +368,7 @@ function startAttack(){
   hasAttacked = false; // 턴 시작
   setPhase("공격", ATTACK_TIME);
   attackChoice=null; lastPreview=null; clearEnemyMarks(); clearMyMarks();
+  renderBoards(); // 체력바 최신화
   log("공격 단계 시작. 내 기물 하나를 선택하고 적 보드를 지정하세요.");
 }
 
@@ -333,7 +376,7 @@ function autoAttackIfNone(){
   if(attackChoice){ return beginBattle(); }
   hasAttacked = true;
   const myUnits=[];
-  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(me[r][c]) myUnits.push({r,c,name:me[r][c]});
+  for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(me[r][c]) myUnits.push({r,c,name:me[r][c].name});
   if(myUnits.length===0){ beginBattle(); return; }
   const unit = myUnits[rnd(myUnits.length)];
   const target = {r:rnd(BOARD_SIZE), c:rnd(BOARD_SIZE)};
@@ -351,7 +394,7 @@ function beginBattle(){
 
   // 1) 플레이어의 공격 처리
   const {unitAt, target} = attackChoice;
-  const myName = me[unitAt.r][unitAt.c];
+  const myName = me[unitAt.r][unitAt.c]?.name;
   const res = applyAttack(elBoardAI, ai, myName, target);
   collectAiUnits();
   log(`전투: ${myName}의 패턴[${res.pattern}]이 ${res.hits}칸 타격, ${res.kills}개 격파.`);
@@ -364,29 +407,28 @@ function beginBattle(){
 async function enemyCounterAndEnd(){
   if(aiUnits.length>0){
     setPhase("상대턴",0);
-    showAiOverlay();          // 팝업 먼저 그리기
-    await nextFrame();        // 한 프레임 페인트 보장
-    await delay(AI_TURN_DELAY); // 1초 기다림
+    showAiOverlay();          // 팝업 먼저
+    await nextFrame();        // 페인트 보장
+    await delay(AI_TURN_DELAY); // 1초 대기
 
     clearMyMarks();
     const aiUnit = aiUnits[rnd(aiUnits.length)];
     const targetMe = {r:rnd(BOARD_SIZE), c:rnd(BOARD_SIZE)};
     const res2 = applyAttack(elBoardMe, me, aiUnit.name, targetMe);
+    // 내 보드 체력바 갱신
+    renderBoards();
     log(`적 반격: ${aiUnit.name}의 패턴[${res2.pattern}]이 내 보드 (${targetMe.r+1},${targetMe.c+1}) 기준으로 ${res2.hits}칸 타격, ${res2.kills}개 격파.`);
 
     const myRemainAfter = countUnits(me);
     hideAiOverlay();
 
-    if(myRemainAfter===0){
-      phase="종료"; log("패배: 내 기물 전멸."); setPhase("종료",0);
-    } else {
-      endTurn();
-    }
+    if(myRemainAfter===0){ phase="종료"; log("패배: 내 기물 전멸."); setPhase("종료",0); return; }
+    endTurn();
     return;
   }
   endTurn();
 }
-  
+
 function countUnits(board){
   let n=0; for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(board[r][c]) n++;
   return n;
@@ -400,13 +442,13 @@ function endTurn(){
 
 /* ------------------ 상호작용 ------------------ */
 elBoardMe.addEventListener('click', (e)=>{
-  const idx = e.target.dataset.idx; if(idx===undefined) return;
+  const idx = e.target.closest('.cell')?.dataset.idx; if(idx===undefined) return;
   const r=Math.floor(idx/BOARD_SIZE), c=idx%BOARD_SIZE;
 
   if(phase==="준비"){
     if(selectedReserve!=null && !me[r][c]){
       const name = reserve.splice(selectedReserve,1)[0];
-      selectedReserve=null; me[r][c]=name; renderReserve(); renderBoards();
+      selectedReserve=null; me[r][c]=createUnit(name); renderReserve(); renderBoards();
     }else if(me[r][c] && !pickUp){
       pickUp={r,c};
     }else if(pickUp){
@@ -418,13 +460,13 @@ elBoardMe.addEventListener('click', (e)=>{
   }else if(phase==="공격"){
     if(hasAttacked) return;
     if(attackChoice && attackChoice.unitAt) return;
-    if(me[r][c]){ attackChoice={unitAt:{r,c,name:me[r][c]}, target:null}; log(`선택: ${me[r][c]} (내 보드 ${r+1},${c+1})`); }
+    if(me[r][c]){ attackChoice={unitAt:{r,c,name:me[r][c].name}, target:null}; log(`선택: ${me[r][c].name} (내 보드 ${r+1},${c+1})`); }
   }
 });
 
 elBoardAI.addEventListener('click',(e)=>{
   if(phase!=="공격" || hasAttacked || !attackChoice || !attackChoice.unitAt) return;
-  const idx = e.target.dataset.idx; if(idx===undefined) return;
+  const idx = e.target.closest('.cell')?.dataset.idx; if(idx===undefined) return;
   const r=Math.floor(idx/BOARD_SIZE), c=idx%BOARD_SIZE;
 
   if(lastPreview && lastPreview.r===r && lastPreview.c===c){
@@ -439,7 +481,7 @@ elBoardAI.addEventListener('click',(e)=>{
 function previewOn(r,c,keep=false){
   clearEnemyMarks();
   lastPreview = {r,c};
-  const name = me[attackChoice.unitAt.r][attackChoice.unitAt.c];
+  const name = me[attackChoice.unitAt.r][attackChoice.unitAt.c].name;
   const pattern = PATTERNS[name] || "plus1";
   const ofs = patternOffsets(pattern);
   ofs.forEach(([dr,dc])=>{
