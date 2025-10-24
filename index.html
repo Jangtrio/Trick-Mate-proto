@@ -408,24 +408,22 @@ async function enemyCounterAndEnd(){
     log("상대는 이번 턴에 사용할 기물이 없음.");
   }
 
-  if(countUnits(ai)===0){ setPhase("종료"); log("승리: 상대 전멸."); return; }
-  if(countUnits(me)===0){ setPhase("종료"); log("패배: 아군 전멸."); return; }
-
-  endTurn();
-}
-function countUnits(board){let n=0; for(let r=0;r<BOARD_SIZE;r++) for(let c=0;c<BOARD_SIZE;c++) if(board[r][c]) n++; return n;}
-async function endTurn(){
-  if(turn >= MAX_TURN){
-    setPhase("종료"); 
-    showResultPopup(); // 새로 추가
+  // 아군 왕 즉사 체크
+  if(!hasKing(me)){
+    log("패배: 아군 왕이 사망했습니다.");
+    setPhase("종료");
+    showResultPopup();
     return;
   }
-  turn++;
-  document.getElementById('turn').textContent=turn;
-  elNextOverlay.style.display='flex';
-  await nextFrame(); await delay(600);
-  elNextOverlay.style.display='none';
-  startAttack();
+
+  // 전멸 체크
+  if(countUnits(ai)===0 || countUnits(me)===0){
+    setPhase("종료");
+    showResultPopup();
+    return;
+  }
+
+  endTurn();
 }
 
 /* ===== 상호작용 ===== */
